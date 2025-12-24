@@ -1,0 +1,7 @@
+{
+  "name": "Kotha-Boli",
+  "description": "A minimalist Bengali story writing application with AI assistance, smart dialogue formatting, and high-quality Text-to-Speech integration.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
