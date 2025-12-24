@@ -1,16 +1,19 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Plus, BookOpen, Trash2, Sparkles, Volume2, Quote, 
   Loader2, X, ChevronLeft, ChevronRight, Image as ImageIcon,
   Book, Download, Share2, LayoutGrid, Type, User, Save, Zap,
-  FileText, Globe, FileType, FileDown, GalleryVertical, FileImage
+  FileText, Globe, FileType, FileDown, GalleryVertical, 
+  AlertCircle, Info, Maximize2, Minimize2, Clock, AlignLeft,
+  Search, Wand2, RefreshCcw, Settings, ShieldCheck, ShieldAlert,
+  Moon, Sun, CheckCircle2
 } from 'lucide-react';
-import { Story, StoryScene, AIModelMode, AI_PERSONAS } from './types';
+import { Story, StoryScene, AIModelMode, AI_PERSONAS, AppSettings } from './types';
 import { storageService } from './services/storageService';
 import { geminiService } from './services/geminiService';
 
-// Audio Processing Utils
+// Audio Decoding Utilities
 function decode(base64: string) {
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
@@ -33,6 +36,7 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: 
 
 const App: React.FC = () => {
   const [stories, setStories] = useState<Story[]>([]);
+  const [settings, setSettings] = useState<AppSettings>(storageService.loadSettings());
   const [activeStoryId, setActiveStoryId] = useState<string | null>(null);
   const [view, setView] = useState<'library' | 'editor'>('library');
   const [editorTab, setEditorTab] = useState<'write' | 'storyboard' | 'publish'>('write');
@@ -40,14 +44,17 @@ const App: React.FC = () => {
   const [isTTSLoading, setIsTTSLoading] = useState(false);
   const [aiMode, setAiMode] = useState<AIModelMode>(AIModelMode.STANDARD);
   const [showAIModal, setShowAIModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const [isFocusMode, setIsFocusMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load Initial Data
+  // Persistence logic
   useEffect(() => {
     const loaded = storageService.loadStories();
     setStories(loaded);
@@ -57,151 +64,49 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Debounced Save Mechanism
   useEffect(() => {
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    
     if (stories.length > 0) {
       setIsAutoSaving(true);
       saveTimeoutRef.current = setTimeout(() => {
         storageService.saveStories(stories);
         setIsAutoSaving(false);
-      }, 1500);
+      }, settings.autoSaveInterval);
     }
-  }, [stories]);
+  }, [stories, settings.autoSaveInterval]);
 
   useEffect(() => {
     if (activeStoryId) storageService.saveActiveId(activeStoryId);
   }, [activeStoryId]);
 
-  const activeStory = stories.find(s => s.id === activeStoryId);
+  useEffect(() => {
+    storageService.saveSettings(settings);
+  }, [settings]);
 
-  // --- Export Functions ---
-  const downloadFile = (content: string, fileName: string, contentType: string) => {
-    const a = document.createElement("a");
-    const file = new Blob([content], { type: contentType });
-    a.href = URL.createObjectURL(file);
-    a.download = fileName;
-    a.click();
-  };
+  const activeStory = useMemo(() => 
+    stories.find(s => s.id === activeStoryId), 
+  [stories, activeStoryId]);
 
-  const exportToTxt = () => {
-    if (!activeStory) return;
-    const content = `${activeStory.title}\nরচয়িতা: ${activeStory.author}\n\n${activeStory.content}`;
-    downloadFile(content, `${activeStory.title}.txt`, "text/plain;charset=utf-8");
-  };
+  const filteredStories = useMemo(() => {
+    if (!searchQuery) return stories;
+    return stories.filter(s => 
+      s.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      s.author.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [stories, searchQuery]);
 
-  const exportToHtml = () => {
-    if (!activeStory) return;
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html lang="bn">
-      <head>
-        <meta charset="UTF-8">
-        <title>${activeStory.title}</title>
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+Bengali&display=swap');
-          body { font-family: 'Noto Serif Bengali', serif; padding: 50px; line-height: 1.8; max-width: 800px; margin: auto; }
-          h1 { text-align: center; font-size: 3em; }
-          .author { text-align: center; color: #666; font-size: 1.2em; margin-bottom: 50px; }
-          .content { white-space: pre-wrap; font-size: 1.2em; }
-        </style>
-      </head>
-      <body>
-        <h1>${activeStory.title}</h1>
-        <div class="author">রচয়িতা: ${activeStory.author}</div>
-        <div class="content">${activeStory.content}</div>
-      </body>
-      </html>
-    `;
-    downloadFile(htmlContent, `${activeStory.title}.html`, "text/html;charset=utf-8");
-  };
-
-  const exportToDoc = () => {
-    if (!activeStory) return;
-    const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export MS Word</title></head><body>";
-    const footer = "</body></html>";
-    const content = `<h1>${activeStory.title}</h1><h3>রচয়িতা: ${activeStory.author}</h3><p style='white-space: pre-wrap;'>${activeStory.content}</p>`;
-    const source = header + content + footer;
-    downloadFile(source, `${activeStory.title}.doc`, "application/msword");
-  };
-
-  const exportToPdf = () => {
-    window.print();
-  };
-
-  const generateImageBook = () => {
-    if (!activeStory) return;
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    canvas.width = 1080;
-    canvas.height = 1350; // Portrait social size
-
-    // Background
-    ctx.fillStyle = "#fdfcf8";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Header Color Strip
-    ctx.fillStyle = "#1e293b";
-    ctx.fillRect(0, 0, canvas.width, 100);
-
-    // Title
-    ctx.fillStyle = "#0f172a";
-    ctx.font = "bold 80px 'Noto Serif Bengali', serif";
-    ctx.textAlign = "center";
-    ctx.fillText(activeStory.title, canvas.width / 2, 350);
-
-    // Author
-    ctx.font = "40px 'Noto Serif Bengali', serif";
-    ctx.fillStyle = "#64748b";
-    ctx.fillText(`রচয়িতা: ${activeStory.author}`, canvas.width / 2, 430);
-
-    // Synopsis / Preview
-    ctx.font = "34px 'Noto Serif Bengali', serif";
-    ctx.fillStyle = "#334155";
-    const text = activeStory.synopsis || activeStory.content.slice(0, 500) + "...";
-    
-    // Simple line wrapping for canvas
-    const wrapText = (text: string, x: number, y: number, maxWidth: number, lineHeight: number) => {
-      const words = text.split(' ');
-      let line = '';
-      for (let n = 0; n < words.length; n++) {
-        const testLine = line + words[n] + ' ';
-        const metrics = ctx.measureText(testLine);
-        const testWidth = metrics.width;
-        if (testWidth > maxWidth && n > 0) {
-          ctx.fillText(line, x, y);
-          line = words[n] + ' ';
-          y += lineHeight;
-        } else {
-          line = testLine;
-        }
-      }
-      ctx.fillText(line, x, y);
-    };
-
-    wrapText(text, canvas.width / 2, 600, 800, 50);
-
-    // Footer
-    ctx.fillStyle = "#94a3b8";
-    ctx.font = "bold 24px 'Hind Siliguri', sans-serif";
-    ctx.fillText("CREATED WITH KOTHA-BOLI (কথা-বলি)", canvas.width / 2, 1250);
-
-    // Download
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-    const a = document.createElement("a");
-    a.href = dataUrl;
-    a.download = `${activeStory.title}_Social.jpg`;
-    a.click();
-  };
+  const stats = useMemo(() => {
+    if (!activeStory) return { words: 0, time: 0 };
+    const words = activeStory.content.trim().split(/\s+/).filter(w => w.length > 0).length;
+    const time = Math.ceil(words / 150);
+    return { words, time };
+  }, [activeStory]);
 
   const createNewStory = () => {
     const newStory: Story = {
       id: Date.now().toString(),
-      title: 'নতুন গল্প',
-      author: 'অজ্ঞাতনামা লেখক',
+      title: 'শিরোনামহীন পাণ্ডুলিপি',
+      author: 'অজ্ঞাতনামা',
       synopsis: '',
       content: '',
       lastModified: Date.now(),
@@ -212,6 +117,7 @@ const App: React.FC = () => {
     setActiveStoryId(newStory.id);
     setView('editor');
     setEditorTab('write');
+    setIsFocusMode(false);
   };
 
   const updateActiveStory = useCallback((updates: Partial<Story>) => {
@@ -219,38 +125,48 @@ const App: React.FC = () => {
     setStories(prev => prev.map(s => s.id === activeStoryId ? { ...s, ...updates, lastModified: Date.now() } : s));
   }, [activeStoryId]);
 
-  const handleStoryboardGeneration = async () => {
-    if (!activeStory || activeStory.content.length < 100) {
-      alert("স্টোরিবোর্ড তৈরির জন্য কমপক্ষে ১০০টি অক্ষর লিখুন।");
-      return;
-    }
-    setIsAILoading(true);
-    try {
-      const sceneTexts = await geminiService.breakIntoScenes(activeStory.content);
-      const newStoryboard: StoryScene[] = sceneTexts.map((text: string) => ({
-        id: Math.random().toString(36).substr(2, 9),
-        text
-      }));
-      updateActiveStory({ storyboard: newStoryboard });
-    } catch (error) {
-      alert("দৃশ্য তৈরি করতে ত্রুটি হয়েছে।");
-    } finally {
-      setIsAILoading(false);
+  const deleteStory = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (confirm("আপনি কি নিশ্চিতভাবে এই পাণ্ডুলিপিটি মুছে ফেলতে চান?")) {
+      const next = stories.filter(s => s.id !== id);
+      setStories(next);
+      if (activeStoryId === id) {
+        setActiveStoryId(null);
+        setView('library');
+      }
     }
   };
 
-  const illustrateScene = async (sceneId: string) => {
-    const scene = activeStory?.storyboard.find(s => s.id === sceneId);
-    if (!scene || !activeStory) return;
+  const deleteActiveStory = () => {
+    if (activeStoryId) deleteStory(activeStoryId);
+  };
+
+  const handleAISuggestion = async () => {
+    if (!activeStoryId || !aiPrompt) return;
     setIsAILoading(true);
+    setShowAIModal(false);
+    
+    const initialContent = activeStory?.content || "";
+    let accumulated = "";
+    updateActiveStory({ content: initialContent + "\n\n" });
+
     try {
-      const imageUrl = await geminiService.generateImage(scene.text);
-      if (imageUrl) {
-        const updatedStoryboard = activeStory.storyboard.map(s => 
-          s.id === sceneId ? { ...s, imageUrl } : s
-        );
-        updateActiveStory({ storyboard: updatedStoryboard });
-      }
+      await geminiService.generateStoryPartStream(
+        aiPrompt, 
+        initialContent, 
+        aiMode, 
+        settings.isAdultModeEnabled,
+        (chunk) => {
+          accumulated += chunk;
+          updateActiveStory({ content: initialContent + "\n\n" + accumulated });
+          if (textareaRef.current) {
+            textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
+          }
+        }
+      );
+      setAiPrompt('');
+    } catch (err) {
+      alert("এআই সংযোগ বিচ্ছিন্ন হয়েছে। আবার চেষ্টা করুন।");
     } finally {
       setIsAILoading(false);
     }
@@ -259,89 +175,193 @@ const App: React.FC = () => {
   const smartDialogueFormat = () => {
     if (!activeStory) return;
     const lines = activeStory.content.split('\n');
-    const formattedLines = lines.map(line => {
-      const trimmed = line.trim();
-      // Detect dialogue patterns like: রহিম: কেমন আছ? or সে বলল, আমি যাব।
-      if (trimmed.length > 0 && !trimmed.startsWith('—')) {
-        const speechVerbs = ['বলল', 'বললেন', 'বলছি', 'জিজ্ঞেস করল', 'বলল সে', 'শুধানো'];
-        const hasSpeechVerb = speechVerbs.some(verb => trimmed.includes(verb));
-        const hasColon = trimmed.includes(':');
-        
-        if (hasColon || hasSpeechVerb) {
-          return '— ' + trimmed;
+    const speechVerbs = ['বলল', 'বললেন', 'জিজ্ঞেস করল', 'শুনল', 'উত্তর দিল', 'বলছি', 'আর্জি জানালেন'];
+    const formatted = lines.map(line => {
+      const t = line.trim();
+      if (t.length > 0 && !t.startsWith('—')) {
+        if (t.includes(':') || speechVerbs.some(v => t.includes(v))) {
+          return '— ' + t;
         }
       }
       return line;
-    });
-    updateActiveStory({ content: formattedLines.join('\n') });
+    }).join('\n');
+    updateActiveStory({ content: formatted });
   };
 
-  const playTTS = async () => {
+  const handleTTS = async () => {
     if (!activeStory?.content || isTTSLoading) return;
     setIsTTSLoading(true);
     try {
-      const textToPlay = activeStory.content.slice(0, 3000);
-      const base64Audio = await geminiService.generateSpeech(textToPlay);
-      if (base64Audio) {
+      const base64 = await geminiService.generateSpeech(activeStory.content.slice(0, 1500));
+      if (base64) {
         if (!audioContextRef.current) {
           audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         }
         const ctx = audioContextRef.current;
         if (ctx.state === 'suspended') await ctx.resume();
-        const audioBuffer = await decodeAudioData(decode(base64Audio), ctx, 24000, 1);
+        const buffer = await decodeAudioData(decode(base64), ctx, 24000, 1);
         const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
+        source.buffer = buffer;
         source.connect(ctx.destination);
         source.start();
       }
-    } catch (error) {
-      console.error('TTS error:', error);
     } finally {
       setIsTTSLoading(false);
     }
   };
 
-  const renderLibrary = () => (
-    <div className="p-12 max-w-7xl mx-auto min-h-screen animate-in fade-in duration-500">
-      <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-16 gap-8">
-        <div>
-          <div className="flex items-center gap-4 mb-4">
-             <div className="w-14 h-14 bg-slate-900 rounded-[1.25rem] flex items-center justify-center text-white font-bold text-3xl shadow-xl">ক</div>
-             <h1 className="text-5xl font-extrabold text-slate-800 bengali-serif tracking-tight">কথা-বলি</h1>
+  const exportTxt = () => {
+    if (!activeStory) return;
+    const blob = new Blob([`${activeStory.title}\nরচয়িতা: ${activeStory.author}\n\n${activeStory.content}`], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeStory.title}.txt`;
+    a.click();
+  };
+
+  const exportDoc = () => {
+    if (!activeStory) return;
+    const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'></head><body>";
+    const content = `<h1>${activeStory.title}</h1><p>${activeStory.author}</p><p style="white-space: pre-wrap">${activeStory.content}</p>`;
+    const blob = new Blob([header + content + "</body></html>"], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeStory.title}.doc`;
+    a.click();
+  };
+
+  const exportToHtml = () => {
+    if (!activeStory) return;
+    const htmlContent = `<!DOCTYPE html><html lang="bn"><head><meta charset="UTF-8"><title>${activeStory.title}</title><style>@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+Bengali:wght@400;700&display=swap');body { font-family: 'Noto Serif Bengali', serif; line-height: 1.8; max-width: 800px; margin: 40px auto; padding: 20px; color: #334155; background: #fdfcf8; }h1 { text-align: center; color: #0f172a; font-size: 3rem; margin-bottom: 0.5rem; }.author { text-align: center; color: #64748b; font-style: italic; margin-bottom: 3rem; font-weight: bold; }.content { white-space: pre-wrap; font-size: 1.25rem; color: #334155; }</style></head><body><h1>${activeStory.title}</h1><div class="author">রচয়িতা: ${activeStory.author}</div><div class="content">${activeStory.content}</div></body></html>`;
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeStory.title}.html`;
+    a.click();
+  };
+
+  const exportToPdf = () => window.print();
+
+  const generateImageBook = () => alert("এই ফিচারটি উন্নয়ন পর্যায়ে রয়েছে।");
+
+  // --- VIEWS ---
+
+  const SettingsModal = () => (
+    <div className="fixed inset-0 z-[400] flex items-center justify-center bg-slate-950/80 backdrop-blur-xl p-6 animate-fade-in">
+      <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden border border-slate-100 animate-scale-up">
+        <div className="p-10 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-slate-900 text-white rounded-2xl"><Settings size={24} /></div>
+            <div>
+              <h2 className="text-2xl font-black bengali-serif text-slate-900">অ্যাপ সেটিংস</h2>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Configure your Sanctuary</p>
+            </div>
           </div>
-          <p className="text-slate-400 font-bold uppercase tracking-[0.2em] text-[10px] ml-1">The Digital Home for Bengali Lit.</p>
+          <button onClick={() => setShowSettingsModal(false)} className="p-3 hover:bg-white rounded-full text-slate-300 hover:text-slate-900 transition-all shadow-sm ring-1 ring-slate-100"><X size={24} /></button>
         </div>
-        <button 
-          onClick={createNewStory}
-          className="bg-amber-600 hover:bg-amber-700 text-white px-10 py-4 rounded-2xl shadow-xl shadow-amber-600/20 flex items-center gap-3 font-bold transition-all transform hover:scale-105 active:scale-95"
-        >
-          <Plus size={22} /> নতুন গল্প শুরু করুন
-        </button>
+
+        <div className="p-10 space-y-10">
+          <div className="flex items-center justify-between p-6 bg-slate-50 rounded-[2.5rem] border border-slate-100">
+             <div className="flex items-center gap-4">
+                <div className={`p-4 rounded-2xl ${settings.isAdultModeEnabled ? 'bg-rose-100 text-rose-600' : 'bg-slate-200 text-slate-400'}`}>
+                   {settings.isAdultModeEnabled ? <ShieldAlert size={28} /> : <ShieldCheck size={28} />}
+                </div>
+                <div>
+                   <h4 className="font-bold bengali-serif text-lg">১৮+ প্রাপ্তবয়স্ক মোড</h4>
+                   <p className="text-xs text-slate-400 leading-relaxed max-w-[280px]">সাহসী ও নির্ভীক সাহিত্য রচনার জন্য এআই ফিল্টার শিথিল করুন।</p>
+                </div>
+             </div>
+             <button 
+              onClick={() => {
+                if (!settings.isAdultModeEnabled) {
+                  if (confirm("আপনি কি ১৮ বছর বা তার বেশি বয়স্ক? প্রাপ্তবয়স্ক মোড সক্রিয় করলে এআই সাহসী ও বয়স্কোপযোগী সাহিত্য তৈরি করবে।")) {
+                    setSettings({ ...settings, isAdultModeEnabled: true });
+                  }
+                } else {
+                  setSettings({ ...settings, isAdultModeEnabled: false });
+                }
+              }}
+              className={`w-16 h-8 rounded-full transition-all relative ${settings.isAdultModeEnabled ? 'bg-rose-600' : 'bg-slate-200'}`}
+             >
+                <div className={`absolute top-1 w-6 h-6 bg-white rounded-full shadow-lg transition-all ${settings.isAdultModeEnabled ? 'left-9' : 'left-1'}`} />
+             </button>
+          </div>
+
+          <div className="space-y-4">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Auto-Save Frequency</label>
+            <div className="grid grid-cols-3 gap-3">
+              {[1000, 5000, 15000].map(ms => (
+                <button 
+                  key={ms}
+                  onClick={() => setSettings({...settings, autoSaveInterval: ms})}
+                  className={`py-3 rounded-2xl font-bold text-sm border-2 transition-all ${settings.autoSaveInterval === ms ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-400 border-slate-100'}`}
+                >
+                  {ms/1000}s
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-8 bg-slate-50 flex justify-end">
+          <button onClick={() => setShowSettingsModal(false)} className="bg-slate-900 text-white px-10 py-3 rounded-2xl font-bold shadow-xl active:scale-95 transition-all">সংরক্ষণ করুন</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const LibraryView = () => (
+    <div className="min-h-screen max-w-7xl mx-auto px-6 py-12 animate-fade-in">
+      <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8 mb-16">
+        <div className="space-y-2">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-bold text-2xl shadow-xl">ক</div>
+            <h1 className="text-4xl font-black text-slate-800 bengali-serif">কথা-বলি</h1>
+          </div>
+          <p className="text-slate-400 text-xs font-bold uppercase tracking-[0.2em] ml-1">The Sanctuary for Bengali Literati</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
+          <div className="relative flex-1 md:w-80">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+            <input 
+              type="text" 
+              placeholder="পাণ্ডুলিপি খুঁজুন..." 
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="w-full bg-white border border-slate-100 rounded-2xl py-3.5 pl-12 pr-6 focus:ring-4 focus:ring-slate-100 focus:border-slate-300 outline-none transition-all bengali-serif"
+            />
+          </div>
+          <button onClick={() => setShowSettingsModal(true)} className="p-4 bg-white border border-slate-100 rounded-2xl shadow-sm text-slate-400 hover:text-slate-900 transition-all"><Settings size={20} /></button>
+          <button onClick={createNewStory} className="bg-amber-600 hover:bg-amber-700 text-white px-8 py-4 rounded-2xl flex items-center gap-2 font-bold shadow-lg shadow-amber-600/20 transition-all hover:scale-[1.02] active:scale-95"><Plus size={20} /> নতুন লিখুন</button>
+        </div>
       </header>
 
-      {stories.length === 0 ? (
-        <div className="h-[40vh] flex flex-col items-center justify-center space-y-4 text-slate-300">
-          <BookOpen size={80} strokeWidth={1} className="opacity-10" />
-          <p className="bengali-serif text-lg font-medium opacity-50">আপনার কোনো পাণ্ডুলিপি নেই</p>
+      {filteredStories.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-[50vh] text-slate-200 space-y-4">
+          <BookOpen size={100} strokeWidth={0.5} />
+          <p className="bengali-serif text-lg font-medium opacity-50">কোনো পাণ্ডুলিপি পাওয়া যায়নি</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-12">
-          {stories.map(story => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-10 pb-20">
+          {filteredStories.map(story => (
             <div 
               key={story.id} 
-              onClick={() => { setActiveStoryId(story.id); setView('editor'); }}
-              className="group bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden shadow-sm hover:shadow-2xl transition-all cursor-pointer flex flex-col h-[520px]"
+              onClick={() => { setActiveStoryId(story.id); setView('editor'); setEditorTab('write'); }}
+              className="group bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 cursor-pointer flex flex-col h-[520px] relative"
             >
               <div className="h-[65%] bg-slate-50 relative overflow-hidden">
                 {story.coverImage ? (
                   <img src={story.coverImage} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" alt="Cover" />
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-200">
-                    <Book size={80} strokeWidth={0.5} />
-                  </div>
+                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-200"><Book size={80} strokeWidth={0.5} /></div>
                 )}
+                {story.isMature && <div className="absolute top-6 right-6 p-2 bg-rose-600/90 backdrop-blur-md text-white rounded-xl shadow-lg"><Zap size={14} /></div>}
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
-                   <div className="bg-white px-8 py-3 rounded-2xl font-bold text-xs shadow-xl">Edit Manuscript</div>
+                   <div className="bg-white px-8 py-3 rounded-2xl font-bold text-xs shadow-xl">সম্পাদনা করুন</div>
                 </div>
               </div>
               <div className="p-8 flex-1 flex flex-col justify-between">
@@ -350,13 +370,8 @@ const App: React.FC = () => {
                   <p className="text-sm text-slate-400 bengali-serif line-clamp-2 leading-relaxed opacity-80">{story.synopsis || story.content.slice(0, 100) || 'বিবরণ নেই...'}</p>
                 </div>
                 <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-50">
-                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{story.category}</span>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); if(confirm("মুছে ফেলতে চান?")) setStories(stories.filter(s => s.id !== story.id)); }}
-                    className="p-2 text-slate-200 hover:text-red-500 transition-all"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <div className="flex items-center gap-2 text-slate-300 font-black text-[9px] uppercase tracking-widest"><Clock size={10} /> {new Date(story.lastModified).toLocaleDateString('bn-BD')}</div>
+                  <button onClick={(e) => deleteStory(story.id, e)} className="p-2 text-slate-200 hover:text-red-500 transition-all"><Trash2 size={16} /></button>
                 </div>
               </div>
             </div>
@@ -366,296 +381,178 @@ const App: React.FC = () => {
     </div>
   );
 
-  const renderEditor = () => (
-    <div className="flex flex-col h-full bg-[#fdfcf8] animate-in slide-in-from-right duration-500">
-      <header className="h-20 border-b border-slate-100 bg-white/90 backdrop-blur-xl sticky top-0 z-50 flex items-center justify-between px-10 print:hidden">
-        <div className="flex items-center gap-8">
-          <button onClick={() => setView('library')} className="p-3 hover:bg-slate-50 rounded-2xl text-slate-400 hover:text-slate-900 transition-all">
-            <ChevronLeft size={24} />
-          </button>
-          <nav className="flex gap-2 p-1.5 bg-slate-100/50 rounded-2xl border border-slate-200/50">
-            {[
-              { id: 'write', icon: <Type size={18} />, label: 'লিখনী' },
-              { id: 'storyboard', icon: <LayoutGrid size={18} />, label: 'স্টোরিবোর্ড' },
-              { id: 'publish', icon: <BookOpen size={18} />, label: 'প্রকাশনা' }
-            ].map(tab => (
-              <button 
-                key={tab.id}
-                onClick={() => setEditorTab(tab.id as any)}
-                className={`flex items-center gap-2 px-8 py-2.5 rounded-xl text-sm font-bold transition-all ${
-                  editorTab === tab.id ? 'bg-white text-slate-900 shadow-md' : 'text-slate-400 hover:text-slate-600'
-                }`}
-              >
-                {tab.icon} <span className="bengali-serif">{tab.label}</span>
-              </button>
-            ))}
-          </nav>
-        </div>
-        
-        <div className="flex items-center gap-6">
-           {isAILoading && <div className="flex items-center gap-2 text-amber-600 font-bold text-[10px] uppercase tracking-widest"><Loader2 className="animate-spin" size={14} /> AI Processing</div>}
-           <div className={`flex items-center gap-2 text-slate-300 transition-opacity ${isAutoSaving ? 'opacity-100' : 'opacity-0'}`}>
-              <Save size={14} />
-              <span className="text-[10px] font-black uppercase tracking-widest">Saved</span>
-           </div>
-           <button className="p-3 bg-slate-900 text-white rounded-2xl shadow-lg hover:scale-105 transition-all"><Share2 size={18} /></button>
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {editorTab === 'write' && (
-          <div className="max-w-4xl mx-auto pt-24 pb-60 px-10 print:pt-0">
-            <input 
-              value={activeStory?.title} 
-              onChange={e => updateActiveStory({ title: e.target.value })}
-              className="w-full text-7xl font-black bg-transparent border-none focus:outline-none mb-14 bengali-serif text-slate-900 placeholder:text-slate-100 print:text-5xl print:text-center"
-              placeholder="গল্পের নাম..."
-            />
-            <textarea 
-              ref={textareaRef}
-              value={activeStory?.content} 
-              onChange={e => updateActiveStory({ content: e.target.value })}
-              className="w-full min-h-[70vh] text-2xl leading-[2.4] bg-transparent border-none focus:outline-none bengali-serif text-slate-700 placeholder:text-slate-200 resize-none print:text-lg print:leading-relaxed"
-              placeholder="এখানে আপনার অমর লেখনী শুরু করুন..."
-            />
+  const EditorView = () => (
+    <div className={`flex flex-col h-screen bg-[#fdfcf8] transition-all duration-700 ${isFocusMode ? 'focus-mode' : ''}`}>
+      {!isFocusMode && (
+        <header className="h-20 border-b border-slate-100 bg-white/90 backdrop-blur-xl flex items-center justify-between px-8 z-50 sticky top-0 print:hidden">
+          <div className="flex items-center gap-8">
+            <button onClick={() => setView('library')} className="p-2.5 hover:bg-slate-50 rounded-2xl text-slate-400 hover:text-slate-900 transition-all"><ChevronLeft size={24} /></button>
+            <nav className="flex gap-1 p-1.5 bg-slate-100/50 rounded-2xl border border-slate-200/50">
+              {['write', 'storyboard', 'publish'].map(id => (
+                <button 
+                  key={id}
+                  onClick={() => setEditorTab(id as any)}
+                  className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all ${editorTab === id ? 'bg-white text-slate-900 shadow-md scale-[1.02]' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  {id === 'write' ? <Type size={18} /> : id === 'storyboard' ? <LayoutGrid size={18} /> : <BookOpen size={18} />}
+                  <span className="bengali-serif hidden sm:inline">{id === 'write' ? 'লিখনী' : id === 'storyboard' ? 'স্টোরিবোর্ড' : 'প্রকাশনা'}</span>
+                </button>
+              ))}
+            </nav>
           </div>
-        )}
+          <div className="flex items-center gap-6">
+            <div className="flex items-center gap-4 text-[10px] font-black uppercase tracking-widest text-slate-300">
+               <div className="flex items-center gap-1.5"><AlignLeft size={12} /> {stats.words} Words</div>
+               <div className="flex items-center gap-1.5"><Clock size={12} /> {stats.time} Min</div>
+            </div>
+            <div className={`flex items-center gap-2 transition-opacity duration-500 ${isAutoSaving ? 'opacity-100' : 'opacity-0'}`}><Save size={14} className="text-slate-300 animate-pulse" /><span className="text-[10px] font-black uppercase tracking-widest text-slate-300">Auto Saved</span></div>
+            <button onClick={() => setIsFocusMode(true)} className="p-3 bg-white border border-slate-100 text-slate-400 hover:text-slate-900 rounded-2xl shadow-sm transition-all hover:scale-105"><Maximize2 size={18} /></button>
+            <button onClick={deleteActiveStory} className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all"><Trash2 size={20} /></button>
+          </div>
+        </header>
+      )}
 
+      {isFocusMode && <button onClick={() => setIsFocusMode(false)} className="fixed top-8 right-8 z-[200] p-4 bg-slate-900/10 hover:bg-slate-900/20 text-slate-400 hover:text-slate-900 rounded-full transition-all backdrop-blur-lg"><Minimize2 size={24} /></button>}
+
+      <main className="flex-1 overflow-y-auto custom-scrollbar">
+        {editorTab === 'write' && (
+          <article className="max-w-4xl mx-auto px-8 pt-24 pb-60 animate-fade-in print:pt-0">
+            <input value={activeStory?.title} onChange={e => updateActiveStory({ title: e.target.value })} className="w-full text-7xl font-black bg-transparent border-none outline-none mb-12 bengali-serif text-slate-900 placeholder:text-slate-100 focus:placeholder:opacity-0 transition-all print:text-5xl print:text-center" placeholder="গল্পের নাম..." />
+            <textarea ref={textareaRef} value={activeStory?.content} onChange={e => updateActiveStory({ content: e.target.value })} className="w-full min-h-[70vh] text-2xl leading-[2.6] bg-transparent border-none outline-none bengali-serif text-slate-700 placeholder:text-slate-100 resize-none transition-all print:text-lg" placeholder="এখানে আপনার অমর লেখনী শুরু করুন..." />
+          </article>
+        )}
         {editorTab === 'storyboard' && (
-          <div className="max-w-6xl mx-auto p-16 space-y-16 print:hidden">
-            <div className="flex justify-between items-center bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
-              <div>
-                <h2 className="text-3xl font-bold bengali-serif text-slate-800">গল্পের স্টোরিবোর্ড</h2>
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mt-2">Visual Mapping via Gemini Flash</p>
+          <div className="max-w-6xl mx-auto p-12 space-y-12 animate-fade-in">
+             <div className="flex justify-between items-center bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+              <div className="space-y-1">
+                <h2 className="text-3xl font-black bengali-serif text-slate-800">গল্পের স্টোরিবোর্ড</h2>
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">Neural Visual Mapping via Gemini</p>
               </div>
               <button 
-                onClick={handleStoryboardGeneration}
-                className="bg-slate-900 text-white px-10 py-4 rounded-2xl flex items-center gap-3 font-bold hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/10"
+                onClick={async () => {
+                   if(!activeStory || activeStory.content.length < 50) return alert("দৃশ্য তৈরির জন্য আরও কিছু লিখুন।");
+                   setIsAILoading(true);
+                   try {
+                     const sceneTexts = await geminiService.breakIntoScenes(activeStory.content);
+                     updateActiveStory({ storyboard: sceneTexts.map((text: string) => ({ id: Math.random().toString(36).substr(2, 9), text })) });
+                   } finally { setIsAILoading(false); }
+                }}
+                className="bg-slate-900 text-white px-10 py-4 rounded-2xl flex items-center gap-3 font-bold hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/10 active:scale-95"
               >
-                <Sparkles size={20} /> দৃশ্য তৈরি করুন
+                {isAILoading ? <Loader2 className="animate-spin" size={20} /> : <Wand2 size={20} />} 
+                <span className="bengali-serif">দৃশ্য বিভাজন</span>
               </button>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pb-40">
-              {activeStory?.storyboard.map((scene, idx) => (
-                <div key={scene.id} className="bg-white rounded-[3.5rem] border border-slate-100 overflow-hidden shadow-sm hover:shadow-2xl transition-all">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-10 pb-40">
+              {activeStory?.storyboard.length === 0 ? (
+                <div className="col-span-full py-32 border-2 border-dashed border-slate-100 rounded-[4rem] flex flex-col items-center justify-center text-slate-300"><ImageIcon size={64} strokeWidth={0.5} className="mb-4" /><p className="bengali-serif">দৃশ্যগুলো এখানে প্রদর্শিত হবে</p></div>
+              ) : activeStory?.storyboard.map((scene, idx) => (
+                <div key={scene.id} className="bg-white rounded-[3rem] border border-slate-100 overflow-hidden shadow-sm hover:shadow-2xl transition-all group">
                   <div className="aspect-video bg-slate-50 relative overflow-hidden ring-1 ring-inset ring-slate-100/50">
                     {scene.imageUrl ? (
-                      <img src={scene.imageUrl} className="w-full h-full object-cover" alt="Scene" />
+                      <img src={scene.imageUrl} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" alt="Scene" />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center gap-6 text-slate-200">
                         <ImageIcon size={64} strokeWidth={0.5} />
-                        <button 
-                          onClick={() => illustrateScene(scene.id)}
-                          className="px-8 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black text-slate-500 hover:text-amber-600 hover:border-amber-500 transition-all shadow-md active:scale-95 uppercase tracking-widest"
-                        >
-                          Illustrate Scene
-                        </button>
+                        <button onClick={async () => { setIsAILoading(true); const url = await geminiService.generateImage(scene.text); if(url) updateActiveStory({ storyboard: activeStory.storyboard.map(s => s.id === scene.id ? { ...s, imageUrl: url } : s) }); setIsAILoading(false); }} className="px-8 py-3 bg-white border border-slate-200 rounded-2xl text-[10px] font-black text-slate-500 hover:text-amber-600 transition-all shadow-md active:scale-95 uppercase tracking-widest">Generate Visual</button>
                       </div>
                     )}
                     <div className="absolute top-6 left-6 bg-slate-900/80 backdrop-blur-xl text-white text-[9px] px-4 py-1.5 rounded-full font-black uppercase tracking-widest border border-white/10 shadow-lg">Scene {idx + 1}</div>
                   </div>
-                  <div className="p-10">
-                    <p className="bengali-serif text-xl leading-relaxed text-slate-700 opacity-90">{scene.text}</p>
-                  </div>
+                  <div className="p-10"><p className="bengali-serif text-xl leading-relaxed text-slate-700 opacity-90">{scene.text}</p></div>
                 </div>
               ))}
             </div>
           </div>
         )}
-
         {editorTab === 'publish' && (
-          <div className="max-w-6xl mx-auto p-16 space-y-16 print:hidden">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-16">
-              <div className="lg:col-span-4 space-y-8">
-                <div className="aspect-[3/4.5] bg-slate-50 rounded-[3.5rem] overflow-hidden shadow-2xl relative group border-[12px] border-white ring-1 ring-slate-100">
-                  {activeStory?.coverImage ? (
-                    <img src={activeStory.coverImage} className="w-full h-full object-cover" alt="Cover" />
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-100">
-                       <Book size={100} strokeWidth={0.5} />
+          <div className="max-w-6xl mx-auto p-12 pb-60 space-y-16 animate-fade-in">
+             <div className="grid grid-cols-1 lg:grid-cols-12 gap-16">
+               <div className="lg:col-span-4 space-y-10">
+                 <div className="aspect-[3/4.5] bg-slate-50 rounded-[3.5rem] overflow-hidden shadow-2xl relative group border-[12px] border-white ring-1 ring-slate-100">
+                    {activeStory?.coverImage ? <img src={activeStory.coverImage} className="w-full h-full object-cover" alt="Cover" /> : <div className="w-full h-full flex flex-col items-center justify-center text-slate-100"><Book size={100} strokeWidth={0.5} /></div>}
+                    <button onClick={async () => { setIsAILoading(true); const url = await geminiService.generateImage(`Dramatic book cover for "${activeStory?.title}". Theme: ${activeStory?.synopsis || "Bengali Literature"}`); if (url) updateActiveStory({ coverImage: url }); setIsAILoading(false); }} className="absolute inset-0 bg-slate-900/70 backdrop-blur-md opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-500"><div className="bg-white px-8 py-3 rounded-2xl font-bold text-xs flex items-center gap-2 text-slate-900 shadow-xl active:scale-95"><Sparkles size={14} className="text-amber-500" />AI Cover Design</div></button>
+                 </div>
+                 <div className="space-y-4">
+                    <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest ml-4">Export Formats</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <button onClick={exportTxt} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600"><FileText size={28} className="text-blue-500" /><span className="text-[10px] font-bold uppercase tracking-widest">Plain Text</span></button>
+                      <button onClick={exportToHtml} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600"><Globe size={28} className="text-emerald-500" /><span className="text-[10px] font-bold uppercase tracking-widest">HTML Web</span></button>
+                      <button onClick={exportDoc} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600"><FileType size={28} className="text-blue-700" /><span className="text-[10px] font-bold uppercase tracking-widest">MS Word</span></button>
+                      <button onClick={exportToPdf} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600"><FileDown size={28} className="text-red-500" /><span className="text-[10px] font-bold uppercase tracking-widest">PDF Export</span></button>
+                      <button onClick={generateImageBook} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600 col-span-2"><GalleryVertical size={28} className="text-amber-500" /><span className="text-[10px] font-bold uppercase tracking-widest">Social Media Book</span></button>
                     </div>
-                  )}
-                  <button 
-                    onClick={async () => {
-                      setIsAILoading(true);
-                      const url = await geminiService.generateImage(`Dramatic book cover for "${activeStory?.title}". Theme: ${activeStory?.synopsis || "Bengali Literature"}`);
-                      if (url) updateActiveStory({ coverImage: url });
-                      setIsAILoading(false);
-                    }}
-                    className="absolute inset-0 bg-slate-900/60 backdrop-blur-md opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-300"
-                  >
-                    <div className="bg-white px-8 py-3 rounded-2xl font-bold text-xs flex items-center gap-2 text-slate-900 shadow-xl active:scale-95">
-                       <Sparkles size={14} className="text-amber-500" />
-                       Design Cover
-                    </div>
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest ml-4">Export Options</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button onClick={exportToTxt} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600">
-                      <FileText size={28} className="text-blue-500" />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">Plain Text</span>
-                    </button>
-                    <button onClick={exportToHtml} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600">
-                      <Globe size={28} className="text-emerald-500" />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">HTML File</span>
-                    </button>
-                    <button onClick={exportToDoc} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600">
-                      <FileType size={28} className="text-blue-700" />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">MS Word</span>
-                    </button>
-                    <button onClick={exportToPdf} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600">
-                      <FileDown size={28} className="text-red-500" />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">PDF Export</span>
-                    </button>
-                    <button onClick={generateImageBook} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600 col-span-2">
-                      <GalleryVertical size={28} className="text-amber-500" />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">Image Story Book (Social)</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="lg:col-span-8 space-y-10">
-                <div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-sm space-y-10">
-                   <div className="space-y-3">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Manuscript Title</label>
-                     <input value={activeStory?.title} onChange={e => updateActiveStory({ title: e.target.value })} className="w-full bg-slate-50 px-8 py-5 rounded-3xl font-bold bengali-serif text-2xl text-slate-800 focus:bg-white focus:ring-4 focus:ring-slate-100 transition-all border-none outline-none" />
-                   </div>
-                   <div className="space-y-3">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Author Name</label>
-                     <div className="flex items-center gap-4 bg-slate-50 px-8 py-5 rounded-3xl">
-                       <User size={20} className="text-slate-300" />
-                       <input value={activeStory?.author} onChange={e => updateActiveStory({ author: e.target.value })} className="bg-transparent border-none focus:outline-none w-full font-bold bengali-serif text-lg text-slate-800" />
-                     </div>
-                   </div>
-                   <div className="space-y-3">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Synopsis</label>
-                     <textarea value={activeStory?.synopsis} onChange={e => updateActiveStory({ synopsis: e.target.value })} className="w-full h-40 bg-slate-50 border-none rounded-[2.5rem] p-8 focus:ring-4 focus:ring-slate-100 outline-none bengali-serif text-lg text-slate-700 leading-relaxed transition-all resize-none" placeholder="গল্পের মূল কাহিনী এক লাইনে লিখুন..." />
-                   </div>
-                   <div className="grid grid-cols-2 gap-8">
-                     <div className="space-y-3">
-                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Genre</label>
-                       <select value={activeStory?.category} onChange={e => updateActiveStory({ category: e.target.value as any })} className="w-full bg-slate-50 rounded-3xl p-5 border-none focus:ring-0 font-bold text-slate-700 appearance-none cursor-pointer">
-                         <option value="Short Story">ছোটগল্প</option>
-                         <option value="Novel">উপন্যাস</option>
-                         <option value="Poetry">কবিতা</option>
-                         <option value="Experimental">পরীক্ষামূলক</option>
-                       </select>
-                     </div>
-                     <div className="space-y-3">
-                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">Rights</label>
-                       <div className="flex items-center gap-3 bg-slate-50 p-5 rounded-3xl text-slate-400 font-bold text-[10px] uppercase tracking-tighter">
-                          All Rights Reserved © {new Date().getFullYear()}
-                       </div>
-                     </div>
-                   </div>
-                </div>
-              </div>
-            </div>
+                 </div>
+               </div>
+               <div className="lg:col-span-8"><div className="bg-white p-12 rounded-[4rem] border border-slate-100 shadow-sm space-y-12"><div className="space-y-4"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Title</label><input value={activeStory?.title} onChange={e => updateActiveStory({ title: e.target.value })} className="w-full bg-slate-50 px-8 py-5 rounded-3xl font-bold bengali-serif text-3xl text-slate-800 focus:bg-white focus:ring-4 focus:ring-slate-100 transition-all border-none outline-none" /></div><div className="space-y-4"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Author</label><div className="flex items-center gap-4 bg-slate-50 px-8 py-5 rounded-3xl"><User size={20} className="text-slate-300" /><input value={activeStory?.author} onChange={e => updateActiveStory({ author: e.target.value })} className="bg-transparent border-none focus:outline-none w-full font-bold bengali-serif text-xl text-slate-800" /></div></div><div className="space-y-4"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Synopsis</label><textarea value={activeStory?.synopsis} onChange={e => updateActiveStory({ synopsis: e.target.value })} className="w-full h-44 bg-slate-50 border-none rounded-[3rem] p-10 focus:ring-4 focus:ring-slate-100 outline-none bengali-serif text-xl text-slate-700 leading-relaxed transition-all resize-none" placeholder="এক বাক্যে গল্পের পটভূমি..." /></div><div className="grid grid-cols-2 gap-8"><div className="space-y-4"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Genre</label><select value={activeStory?.category} onChange={e => updateActiveStory({ category: e.target.value as any })} className="w-full bg-slate-50 rounded-3xl p-6 border-none focus:ring-0 font-bold text-slate-700 appearance-none cursor-pointer text-lg"><option value="Short Story">ছোটগল্প</option><option value="Novel">উপন্যাস</option><option value="Poetry">কবিতা</option><option value="Experimental">পরীক্ষামূলক</option></select></div><div className="space-y-4"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-4">Maturity</label><div className={`p-6 rounded-3xl font-bold text-xs uppercase tracking-widest flex items-center gap-2 transition-all ${settings.isAdultModeEnabled ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-400'}`}>{settings.isAdultModeEnabled ? <><ShieldAlert size={16} /> Mature Content (18+)</> : <><ShieldCheck size={16} /> All Ages</>}</div></div></div></div></div>
+             </div>
           </div>
         )}
-      </div>
+      </main>
 
-      {/* Floating Action HUD */}
-      <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-[100] transition-transform hover:scale-[1.02] print:hidden">
-        <div className="bg-slate-900/95 backdrop-blur-3xl border border-white/10 px-10 py-5 rounded-[3.5rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.5)] flex items-center gap-10">
-           <button 
-             onClick={() => setShowAIModal(true)} 
-             className="flex items-center gap-3 font-bold text-white hover:text-amber-400 transition-colors group"
-           >
-             <Sparkles size={24} className="text-amber-500 group-hover:scale-125 transition-transform" />
-             <span className="bengali-serif text-lg">এআই লেখক</span>
-           </button>
-           
-           <div className="h-10 w-[1px] bg-white/10" />
-           
-           <div className="flex items-center gap-6">
-             <button onClick={smartDialogueFormat} className="p-4 bg-white/5 hover:bg-white/10 rounded-full transition-all text-white active:scale-90" title="Dialogues"><Quote size={22} /></button>
-             <button onClick={playTTS} disabled={isTTSLoading} className="p-4 bg-white/5 hover:bg-white/10 rounded-full transition-all text-white active:scale-90 disabled:opacity-30" title="Listen">{isTTSLoading ? <Loader2 size={22} className="animate-spin text-amber-500" /> : <Volume2 size={22} />}</button>
-             <button onClick={() => setEditorTab('storyboard')} className="p-4 bg-white/5 hover:bg-white/10 rounded-full transition-all text-white active:scale-90" title="Storyboard"><ImageIcon size={22} /></button>
-           </div>
-        </div>
-      </div>
+      <div className={`fixed bottom-12 left-1/2 -translate-x-1/2 z-[150] transition-all duration-700 ${isFocusMode ? 'scale-75 opacity-20 hover:scale-100 hover:opacity-100' : ''}`}><div className="bg-slate-950/90 backdrop-blur-3xl border border-white/10 px-10 py-5 rounded-[4rem] shadow-2xl flex items-center gap-8 ring-1 ring-white/10"><button onClick={() => setShowAIModal(true)} className="flex items-center gap-3 font-bold text-white hover:text-amber-400 transition-all group px-4 py-1"><div className="relative"><Sparkles size={24} className="text-amber-500 group-hover:scale-110 group-hover:rotate-12 transition-all" /><div className="absolute inset-0 bg-amber-500 blur-xl opacity-0 group-hover:opacity-40 transition-opacity" /></div><span className="bengali-serif text-xl">এআই মিউজ</span></button><div className="h-10 w-[1px] bg-white/10 mx-2" /><div className="flex items-center gap-4"><button onClick={smartDialogueFormat} className="p-4 bg-white/5 hover:bg-white/10 rounded-full transition-all text-white active:scale-90" title="Smart Format"><Quote size={22} /></button><button onClick={handleTTS} disabled={isTTSLoading} className="p-4 bg-white/5 hover:bg-white/10 rounded-full transition-all text-white active:scale-90 disabled:opacity-20" title="Read Aloud">{isTTSLoading ? <Loader2 size={22} className="animate-spin text-amber-500" /> : <Volume2 size={22} />}</button><button onClick={() => setEditorTab('storyboard')} className="p-4 bg-white/5 hover:bg-white/10 rounded-full transition-all text-white active:scale-90" title="View Storyboard"><ImageIcon size={22} /></button><button onClick={() => { updateActiveStory({ content: '' }); }} className="p-4 bg-white/5 hover:bg-red-500/20 rounded-full transition-all text-white active:scale-90" title="Clear Content"><RefreshCcw size={22} /></button></div></div></div>
     </div>
   );
 
   return (
-    <div className="h-screen w-full overflow-hidden flex flex-col font-sans selection:bg-amber-100">
-      {view === 'library' ? renderLibrary() : renderEditor()}
+    <div className="min-h-screen w-full selection:bg-amber-100 font-sans">
+      {view === 'library' ? <LibraryView /> : <EditorView />}
+      
+      {showSettingsModal && <SettingsModal />}
 
       {showAIModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/90 backdrop-blur-xl p-8">
-          <div className="bg-white w-full max-w-4xl rounded-[4rem] shadow-2xl overflow-hidden border border-slate-100 animate-in zoom-in-95 duration-300">
-            <div className="p-14 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-              <div>
-                <h2 className="text-4xl font-bold bengali-serif text-slate-900">এআই লেখক সহায়িকা</h2>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] mt-3 ml-2">Creative Neural Synergy</p>
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/95 backdrop-blur-2xl p-6 animate-fade-in">
+          <div className="bg-white w-full max-w-4xl rounded-[4rem] shadow-2xl overflow-hidden border border-white/10 animate-scale-up">
+            <div className="p-12 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+              <div className="space-y-1">
+                <h2 className="text-4xl font-black bengali-serif text-slate-900">এআই লেখক সহায়িকা</h2>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] mt-3 ml-2">Collaborative Neural Creativity</p>
               </div>
-              <button onClick={() => setShowAIModal(false)} className="p-5 hover:bg-white rounded-full text-slate-300 hover:text-slate-900 transition-all active:scale-75 shadow-sm ring-1 ring-slate-100"><X size={36} /></button>
+              <button onClick={() => setShowAIModal(false)} className="p-5 hover:bg-white rounded-full text-slate-300 hover:text-slate-900 transition-all active:scale-75 shadow-sm ring-1 ring-slate-100"><X size={32} /></button>
             </div>
             
-            <div className="p-14 space-y-12">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                {AI_PERSONAS.map(p => (
-                  <button 
-                    key={p.id} 
-                    onClick={() => setAiMode(p.id)}
-                    className={`p-10 rounded-[2.5rem] border-2 text-left transition-all relative overflow-hidden group ${
-                      aiMode === p.id 
-                        ? 'bg-amber-600 border-amber-600 shadow-2xl shadow-amber-600/30 -translate-y-1' 
-                        : 'bg-white hover:bg-slate-50 border-slate-100'
-                    }`}
-                  >
-                    <div className="text-5xl mb-6 group-hover:scale-110 transition-transform duration-300">{p.icon}</div>
-                    <div className={`font-bold bengali-serif text-2xl ${aiMode === p.id ? 'text-white' : 'text-slate-800'}`}>{p.bnName}</div>
-                    <p className={`text-[11px] mt-3 leading-relaxed opacity-90 ${aiMode === p.id ? 'text-amber-50' : 'text-slate-500'}`}>{p.description}</p>
-                    {aiMode === p.id && <div className="absolute top-6 right-6"><Zap size={16} className="text-white fill-white animate-pulse" /></div>}
-                  </button>
-                ))}
+            <div className="p-12 space-y-10">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                {AI_PERSONAS.map(p => {
+                  const isLocked = p.isMature && !settings.isAdultModeEnabled;
+                  return (
+                    <button 
+                      key={p.id} 
+                      onClick={() => !isLocked && setAiMode(p.id)}
+                      className={`p-6 rounded-[2.5rem] border-2 text-center transition-all relative overflow-hidden flex flex-col items-center gap-3 ${
+                        isLocked ? 'opacity-40 grayscale cursor-not-allowed border-slate-100 bg-slate-50' : 
+                        aiMode === p.id 
+                          ? (p.id === AIModelMode.BOLD ? 'bg-rose-700 border-rose-700 shadow-xl shadow-rose-700/30' : 'bg-slate-900 border-slate-900 shadow-xl shadow-slate-900/30')
+                          : 'bg-white hover:bg-slate-50 border-slate-100 shadow-sm'
+                      }`}
+                    >
+                      <div className="text-4xl">{p.icon}</div>
+                      <div className={`font-bold bengali-serif text-lg ${aiMode === p.id ? 'text-white' : 'text-slate-800'}`}>{p.bnName}</div>
+                      {isLocked ? <ShieldAlert size={14} className="text-slate-400" /> : aiMode === p.id && <Zap size={14} className="text-white fill-white animate-pulse" />}
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="space-y-4">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Next Chapter Direction (Prompt)</label>
-                <textarea 
-                  value={aiPrompt} 
-                  onChange={e => setAiPrompt(e.target.value)}
-                  className="w-full h-52 bg-slate-50 rounded-[3rem] p-12 focus:ring-8 focus:ring-amber-500/5 focus:bg-white focus:border-amber-200 border-2 border-transparent outline-none bengali-serif text-2xl text-slate-800 resize-none transition-all placeholder:text-slate-200"
-                  placeholder="গল্পের পরবর্তী দৃশ্য বা পরিচ্ছেদের নির্দেশনা দিন..."
-                />
+                <div className="flex items-center justify-between ml-2">
+                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Next Chapter/Scene Direction</label>
+                   {settings.isAdultModeEnabled && (
+                      <div className="flex items-center gap-2 bg-rose-50 px-4 py-1.5 rounded-full border border-rose-100 animate-pulse">
+                         <ShieldAlert size={12} className="text-rose-600" />
+                         <span className="text-rose-700 font-bold text-[9px] uppercase tracking-widest">Adult Mode Active</span>
+                      </div>
+                   )}
+                </div>
+                <textarea value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} className="w-full h-48 bg-slate-50 rounded-[3rem] p-10 focus:ring-8 focus:ring-slate-100 focus:bg-white border-2 border-transparent outline-none bengali-serif text-2xl text-slate-800 resize-none transition-all placeholder:text-slate-200" placeholder="গল্পটি ঠিক কীভাবে এগোবে? একটি ছোট সংকেত দিন..." />
               </div>
 
-              <div className="flex justify-end gap-10 pt-8 items-center">
-                <button onClick={() => setShowAIModal(false)} className="font-bold text-slate-400 hover:text-slate-900 transition-colors uppercase tracking-[0.2em] text-xs">বাতিল</button>
-                <button 
-                  onClick={async () => {
-                    if (!activeStoryId || !aiPrompt) return;
-                    setIsAILoading(true);
-                    setShowAIModal(false);
-                    const initial = activeStory?.content || "";
-                    let accumulated = "";
-                    updateActiveStory({ content: initial + "\n\n" });
-                    try {
-                      await geminiService.generateStoryPartStream(aiPrompt, initial, aiMode, (chunk) => {
-                        accumulated += chunk;
-                        updateActiveStory({ content: initial + "\n\n" + accumulated });
-                        if (textareaRef.current) textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
-                      });
-                      setAiPrompt('');
-                    } catch (err) {
-                      alert("এআই সংকেত পাওয়া যায়নি।");
-                    } finally {
-                      setIsAILoading(false);
-                    }
-                  }}
-                  disabled={!aiPrompt}
-                  className="bg-slate-900 text-white px-20 py-6 rounded-[2.5rem] font-bold shadow-2xl shadow-slate-900/20 hover:bg-slate-800 hover:scale-105 active:scale-95 transition-all disabled:opacity-20 flex items-center gap-4 text-lg"
-                >
-                  গল্পটি এগিয়ে নিন <ChevronRight size={24} />
-                </button>
+              <div className="flex justify-between items-center pt-6 border-t border-slate-50">
+                <div className="flex items-center gap-3 text-slate-400"><Info size={16} /><span className="text-[10px] font-bold uppercase tracking-widest">Pro AI Powered</span></div>
+                <div className="flex gap-6 items-center">
+                  <button onClick={() => setShowAIModal(false)} className="font-bold text-slate-400 hover:text-slate-900 transition-colors uppercase tracking-widest text-xs">বাতিল</button>
+                  <button onClick={handleAISuggestion} disabled={!aiPrompt} className={`px-16 py-5 rounded-[2.5rem] font-bold shadow-2xl transition-all disabled:opacity-30 flex items-center gap-3 text-lg text-white ${aiMode === AIModelMode.BOLD ? 'bg-rose-700 hover:bg-rose-800' : 'bg-slate-900 hover:bg-slate-800'} hover:scale-105 active:scale-95`}>লেখনী শুরু করুন <ChevronRight size={22} /></button>
+                </div>
               </div>
             </div>
           </div>
@@ -663,25 +560,16 @@ const App: React.FC = () => {
       )}
 
       <style>{`
-        body { background-color: #fdfcf8; color: #1e293b; overflow: hidden; }
-        .custom-scrollbar::-webkit-scrollbar { width: 12px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { 
-          background: #e2e8f0; 
-          border-radius: 20px; 
-          border: 4px solid #fdfcf8; 
-          background-clip: content-box; 
-        }
+        @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes scale-up { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .animate-fade-in { animation: fade-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .animate-scale-up { animation: scale-up 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
         .bengali-serif { font-family: 'Noto Serif Bengali', serif; }
-        textarea::placeholder, input::placeholder { color: #f1f5f9; }
-        .animate-in { animation: animate-in 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-        @keyframes animate-in { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
-
-        @media print {
-          body { overflow: visible !important; height: auto !important; background: white !important; }
-          .custom-scrollbar { overflow: visible !important; height: auto !important; }
-          #root > div { height: auto !important; }
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #f1f5f9; border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
+        .focus-mode { background-color: #fdfcf8 !important; }
+        @media print { body, .focus-mode { background: white !important; } .custom-scrollbar { overflow: visible !important; height: auto !important; } }
       `}</style>
     </div>
   );

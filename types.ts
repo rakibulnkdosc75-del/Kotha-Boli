@@ -5,6 +5,12 @@ export interface StoryScene {
   imageUrl?: string;
 }
 
+export interface AppSettings {
+  isAdultModeEnabled: boolean;
+  autoSaveInterval: number;
+  uiTheme: 'classic' | 'modern';
+}
+
 export interface Story {
   id: string;
   title: string;
@@ -15,6 +21,9 @@ export interface Story {
   lastModified: number;
   category: 'Short Story' | 'Novel' | 'Poetry' | 'Experimental';
   storyboard: StoryScene[];
+  wordCount?: number;
+  readTime?: number;
+  isMature?: boolean;
 }
 
 export enum AIModelMode {
@@ -31,12 +40,14 @@ export interface AIPersona {
   bnName: string;
   description: string;
   icon: string;
+  color: string;
+  isMature?: boolean;
 }
 
 export const AI_PERSONAS: AIPersona[] = [
-  { id: AIModelMode.STANDARD, name: 'Standard', bnName: 'সাধারণ', description: 'আধুনিক ও সহজবোধ্য গদ্যশৈলী।', icon: '✍️' },
-  { id: AIModelMode.CLASSIC, name: 'Classic', bnName: 'কালজয়ী', description: 'বঙ্কিম বা রবীন্দ্রনাথের অনুপ্রেরণায় ধ্রুপদী সাহিত্যরীতি।', icon: '📜' },
-  { id: AIModelMode.THRILLER, name: 'Thriller', bnName: 'রোমাঞ্চকর', description: 'রহস্য ও নাটকীয়তায় ঘেরা দ্রুতগতির লেখনী।', icon: '🔍' },
-  { id: AIModelMode.DIALOGUE, name: 'Dialogue', bnName: 'সংলাপ', description: 'চরিত্রের কথোপকথন ও স্বাভাবিক বাচনভঙ্গিতে দক্ষ।', icon: '💬' },
-  { id: AIModelMode.BOLD, name: 'Bold', bnName: '১৮+ ম্যাচুউর', description: 'তীব্র আবেগ ও প্রাপ্তবয়স্কদের উপযোগী মনস্তাত্ত্বিক প্লট।', icon: '🍷' }
+  { id: AIModelMode.STANDARD, name: 'Standard', bnName: 'আধুনিক গদ্য', description: 'দৈনন্দিন সহজবোধ্য চলিত ভাষায় সাহিত্য রচনা।', icon: '✍️', color: 'bg-blue-500' },
+  { id: AIModelMode.CLASSIC, name: 'Classic', bnName: 'ধ্রুপদী শৈলী', description: 'সাধু ও চলিত মিশ্রিত আভিজাত্যপূর্ণ শব্দশৈলী।', icon: '📜', color: 'bg-amber-600' },
+  { id: AIModelMode.THRILLER, name: 'Thriller', bnName: 'রহস্য-রোমাঞ্চ', description: 'ছোট বাক্য ও টানটান উত্তেজনার আবহ তৈরি।', icon: '🔍', color: 'bg-slate-800' },
+  { id: AIModelMode.DIALOGUE, name: 'Dialogue', bnName: 'কথোপকথন', description: 'চরিত্রের ভাবানুযায়ী প্রাণবন্ত ও নাটকীয় সংলাপ।', icon: '💬', color: 'bg-emerald-600' },
+  { id: AIModelMode.BOLD, name: 'Bold', bnName: '১৮+ সাহিত্য', description: 'প্রাপ্তবয়স্কদের জন্য সাহসী ও মনস্তাত্ত্বিক আখ্যান।', icon: '🍷', color: 'bg-rose-700', isMature: true }
 ];
