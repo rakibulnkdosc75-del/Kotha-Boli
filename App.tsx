@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Plus, BookOpen, Trash2, Sparkles, Volume2, Quote, 
   Loader2, X, ChevronLeft, ChevronRight, Image as ImageIcon,
-  Book, Download, Share2, LayoutGrid, Type, User, Save, Zap
+  Book, Download, Share2, LayoutGrid, Type, User, Save, Zap,
+  FileText, Globe, FileType, FileDown, GalleryVertical, FileImage
 } from 'lucide-react';
 import { Story, StoryScene, AIModelMode, AI_PERSONAS } from './types';
 import { storageService } from './services/storageService';
@@ -44,7 +45,6 @@ const App: React.FC = () => {
   
   const audioContextRef = useRef<AudioContext | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Fix: Use ReturnType<typeof setTimeout> instead of NodeJS.Timeout for consistent browser behavior
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load Initial Data
@@ -75,6 +75,127 @@ const App: React.FC = () => {
   }, [activeStoryId]);
 
   const activeStory = stories.find(s => s.id === activeStoryId);
+
+  // --- Export Functions ---
+  const downloadFile = (content: string, fileName: string, contentType: string) => {
+    const a = document.createElement("a");
+    const file = new Blob([content], { type: contentType });
+    a.href = URL.createObjectURL(file);
+    a.download = fileName;
+    a.click();
+  };
+
+  const exportToTxt = () => {
+    if (!activeStory) return;
+    const content = `${activeStory.title}\nরচয়িতা: ${activeStory.author}\n\n${activeStory.content}`;
+    downloadFile(content, `${activeStory.title}.txt`, "text/plain;charset=utf-8");
+  };
+
+  const exportToHtml = () => {
+    if (!activeStory) return;
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="bn">
+      <head>
+        <meta charset="UTF-8">
+        <title>${activeStory.title}</title>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+Bengali&display=swap');
+          body { font-family: 'Noto Serif Bengali', serif; padding: 50px; line-height: 1.8; max-width: 800px; margin: auto; }
+          h1 { text-align: center; font-size: 3em; }
+          .author { text-align: center; color: #666; font-size: 1.2em; margin-bottom: 50px; }
+          .content { white-space: pre-wrap; font-size: 1.2em; }
+        </style>
+      </head>
+      <body>
+        <h1>${activeStory.title}</h1>
+        <div class="author">রচয়িতা: ${activeStory.author}</div>
+        <div class="content">${activeStory.content}</div>
+      </body>
+      </html>
+    `;
+    downloadFile(htmlContent, `${activeStory.title}.html`, "text/html;charset=utf-8");
+  };
+
+  const exportToDoc = () => {
+    if (!activeStory) return;
+    const header = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Export MS Word</title></head><body>";
+    const footer = "</body></html>";
+    const content = `<h1>${activeStory.title}</h1><h3>রচয়িতা: ${activeStory.author}</h3><p style='white-space: pre-wrap;'>${activeStory.content}</p>`;
+    const source = header + content + footer;
+    downloadFile(source, `${activeStory.title}.doc`, "application/msword");
+  };
+
+  const exportToPdf = () => {
+    window.print();
+  };
+
+  const generateImageBook = () => {
+    if (!activeStory) return;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    canvas.width = 1080;
+    canvas.height = 1350; // Portrait social size
+
+    // Background
+    ctx.fillStyle = "#fdfcf8";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Header Color Strip
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(0, 0, canvas.width, 100);
+
+    // Title
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "bold 80px 'Noto Serif Bengali', serif";
+    ctx.textAlign = "center";
+    ctx.fillText(activeStory.title, canvas.width / 2, 350);
+
+    // Author
+    ctx.font = "40px 'Noto Serif Bengali', serif";
+    ctx.fillStyle = "#64748b";
+    ctx.fillText(`রচয়িতা: ${activeStory.author}`, canvas.width / 2, 430);
+
+    // Synopsis / Preview
+    ctx.font = "34px 'Noto Serif Bengali', serif";
+    ctx.fillStyle = "#334155";
+    const text = activeStory.synopsis || activeStory.content.slice(0, 500) + "...";
+    
+    // Simple line wrapping for canvas
+    const wrapText = (text: string, x: number, y: number, maxWidth: number, lineHeight: number) => {
+      const words = text.split(' ');
+      let line = '';
+      for (let n = 0; n < words.length; n++) {
+        const testLine = line + words[n] + ' ';
+        const metrics = ctx.measureText(testLine);
+        const testWidth = metrics.width;
+        if (testWidth > maxWidth && n > 0) {
+          ctx.fillText(line, x, y);
+          line = words[n] + ' ';
+          y += lineHeight;
+        } else {
+          line = testLine;
+        }
+      }
+      ctx.fillText(line, x, y);
+    };
+
+    wrapText(text, canvas.width / 2, 600, 800, 50);
+
+    // Footer
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "bold 24px 'Hind Siliguri', sans-serif";
+    ctx.fillText("CREATED WITH KOTHA-BOLI (কথা-বলি)", canvas.width / 2, 1250);
+
+    // Download
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = `${activeStory.title}_Social.jpg`;
+    a.click();
+  };
 
   const createNewStory = () => {
     const newStory: Story = {
@@ -247,7 +368,7 @@ const App: React.FC = () => {
 
   const renderEditor = () => (
     <div className="flex flex-col h-full bg-[#fdfcf8] animate-in slide-in-from-right duration-500">
-      <header className="h-20 border-b border-slate-100 bg-white/90 backdrop-blur-xl sticky top-0 z-50 flex items-center justify-between px-10">
+      <header className="h-20 border-b border-slate-100 bg-white/90 backdrop-blur-xl sticky top-0 z-50 flex items-center justify-between px-10 print:hidden">
         <div className="flex items-center gap-8">
           <button onClick={() => setView('library')} className="p-3 hover:bg-slate-50 rounded-2xl text-slate-400 hover:text-slate-900 transition-all">
             <ChevronLeft size={24} />
@@ -283,25 +404,25 @@ const App: React.FC = () => {
 
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         {editorTab === 'write' && (
-          <div className="max-w-4xl mx-auto pt-24 pb-60 px-10">
+          <div className="max-w-4xl mx-auto pt-24 pb-60 px-10 print:pt-0">
             <input 
               value={activeStory?.title} 
               onChange={e => updateActiveStory({ title: e.target.value })}
-              className="w-full text-7xl font-black bg-transparent border-none focus:outline-none mb-14 bengali-serif text-slate-900 placeholder:text-slate-100"
+              className="w-full text-7xl font-black bg-transparent border-none focus:outline-none mb-14 bengali-serif text-slate-900 placeholder:text-slate-100 print:text-5xl print:text-center"
               placeholder="গল্পের নাম..."
             />
             <textarea 
               ref={textareaRef}
               value={activeStory?.content} 
               onChange={e => updateActiveStory({ content: e.target.value })}
-              className="w-full min-h-[70vh] text-2xl leading-[2.4] bg-transparent border-none focus:outline-none bengali-serif text-slate-700 placeholder:text-slate-200 resize-none"
+              className="w-full min-h-[70vh] text-2xl leading-[2.4] bg-transparent border-none focus:outline-none bengali-serif text-slate-700 placeholder:text-slate-200 resize-none print:text-lg print:leading-relaxed"
               placeholder="এখানে আপনার অমর লেখনী শুরু করুন..."
             />
           </div>
         )}
 
         {editorTab === 'storyboard' && (
-          <div className="max-w-6xl mx-auto p-16 space-y-16">
+          <div className="max-w-6xl mx-auto p-16 space-y-16 print:hidden">
             <div className="flex justify-between items-center bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
               <div>
                 <h2 className="text-3xl font-bold bengali-serif text-slate-800">গল্পের স্টোরিবোর্ড</h2>
@@ -344,7 +465,7 @@ const App: React.FC = () => {
         )}
 
         {editorTab === 'publish' && (
-          <div className="max-w-6xl mx-auto p-16 space-y-16">
+          <div className="max-w-6xl mx-auto p-16 space-y-16 print:hidden">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-16">
               <div className="lg:col-span-4 space-y-8">
                 <div className="aspect-[3/4.5] bg-slate-50 rounded-[3.5rem] overflow-hidden shadow-2xl relative group border-[12px] border-white ring-1 ring-slate-100">
@@ -370,10 +491,32 @@ const App: React.FC = () => {
                     </div>
                   </button>
                 </div>
-                <button className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-bold flex items-center justify-center gap-3 shadow-2xl shadow-slate-900/20 hover:bg-slate-800 transition-all active:scale-95">
-                  <Download size={20} /> 
-                  <span className="bengali-serif">PDF হিসেবে সেভ করুন</span>
-                </button>
+
+                <div className="space-y-4">
+                  <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest ml-4">Export Options</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button onClick={exportToTxt} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600">
+                      <FileText size={28} className="text-blue-500" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">Plain Text</span>
+                    </button>
+                    <button onClick={exportToHtml} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600">
+                      <Globe size={28} className="text-emerald-500" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">HTML File</span>
+                    </button>
+                    <button onClick={exportToDoc} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600">
+                      <FileType size={28} className="text-blue-700" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">MS Word</span>
+                    </button>
+                    <button onClick={exportToPdf} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600">
+                      <FileDown size={28} className="text-red-500" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">PDF Export</span>
+                    </button>
+                    <button onClick={generateImageBook} className="p-5 bg-white border border-slate-100 rounded-3xl flex flex-col items-center gap-3 hover:shadow-lg transition-all active:scale-95 text-slate-600 col-span-2">
+                      <GalleryVertical size={28} className="text-amber-500" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">Image Story Book (Social)</span>
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="lg:col-span-8 space-y-10">
@@ -418,7 +561,7 @@ const App: React.FC = () => {
       </div>
 
       {/* Floating Action HUD */}
-      <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-[100] transition-transform hover:scale-[1.02]">
+      <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-[100] transition-transform hover:scale-[1.02] print:hidden">
         <div className="bg-slate-900/95 backdrop-blur-3xl border border-white/10 px-10 py-5 rounded-[3.5rem] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.5)] flex items-center gap-10">
            <button 
              onClick={() => setShowAIModal(true)} 
@@ -533,6 +676,12 @@ const App: React.FC = () => {
         textarea::placeholder, input::placeholder { color: #f1f5f9; }
         .animate-in { animation: animate-in 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes animate-in { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+
+        @media print {
+          body { overflow: visible !important; height: auto !important; background: white !important; }
+          .custom-scrollbar { overflow: visible !important; height: auto !important; }
+          #root > div { height: auto !important; }
+        }
       `}</style>
     </div>
   );
